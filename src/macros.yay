@@ -1,0 +1,131 @@
+<?php
+
+macro ·recursion {
+    for {
+        ·ls (
+            ·chain(
+                ·either(
+                    ·token(T_VARIABLE),
+                    ·either(
+                        ·label('_'),
+                        ·chain(
+                            ·token('('),
+                            ·optional(·ls(·either(·token(T_VARIABLE), ·token('_')), ·token(','))),
+                            ·token(')')
+                        )
+                    )
+                )·binded,
+                ·operator('<-'),
+                ·layer()·bind
+            ),
+            ·token(T_WHITESPACE, "\n")
+        )·binds
+        ·_()·for
+    } yield ·either(
+                ·token(T_VARIABLE),
+                ·chain(
+                    ·token('('),
+                    ·optional(·ls(·token(T_VARIABLE), ·token(','))),
+                    ·token(')')
+                )
+            )·fields
+
+} >> function($ast) {
+
+    $binds = [];
+
+    if (is_array($ast->{'·binds'}[0]['·binded'])) {
+        $binds[0]['binded'] = (string)$ast->{'·binds'}[0]['·binded'][0];
+    } else {
+        $binds[0]['binded'] = (string)$ast->{'·binds'}[0]['·binded'] == '_' ?
+            '$_' :
+            (string)$ast->{'·binds'}[0]['·binded'];
+    }
+
+    list ($binds[0]['bind'], $remaining) = (function($bind) {
+        $binded = '';
+        foreach ($bind as $i => $token) {
+            if ($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) {
+                return [$binded, array_slice($bind, $i+1)];
+            }
+            $binded .= (string) $token;
+        }
+    })($ast->{'·binds'}[0]['·bind']);
+
+    $scope = 'binded';
+    $i = count($binds) - 1;
+
+    foreach ($remaining as $token) {
+        if ($scope == 'binded' && ($token->is(T_VARIABLE) || (string)$token === '_')) {
+            $scope = 'operator(<)';
+            $binds[$i + 1]['binded'] = ((string) $token == '_') ? '$_' : (string) $token;
+            continue;
+        }
+
+        if ($scope == 'operator(<)' && $token->is("<")) {
+            $scope = 'operator(-)';
+            continue;
+        }
+
+        if ($scope == 'operator(-)' && $token->is("-")) {
+            $scope = 'bind';
+            continue;
+        }
+
+        if ($scope == 'bind' && !($token->is(T_WHITESPACE) && stristr((string)$token, "\n"))) {
+            if (!isset($binds[$i + 1]['bind'])) {
+                $binds[$i + 1]['bind'] = '';
+            }
+            $binds[$i + 1]['bind'] .= (string) $token;
+        } elseif ($scope == 'bind') {
+            $i++;
+            $scope = 'binded';
+        }
+        if (isset($binds[$i + 1]['bind'])) {
+            $binds[$i + 1]['bind'] = ltrim($binds[$i + 1]['bind']);
+        }
+    }
+
+    $fields = '';
+    if (is_array($ast->{'·fields'})) {
+
+        switch (count($ast->{'·fields'}[1])) {
+            case 0: $fields = "Unit()"; break;
+            case 1: $fields = "Tuple({$ast->{'·fields'}[1][0]})"; break;
+            case 2: $fields = "Pair({$ast->{'·fields'}[1][0]}, {$ast->{'·fields'}[1][1]})"; break;
+            default:
+                $fields = "Tuple(" .
+                    implode(', ', array_map(function($field){ return (string) $field; }, $ast->{'·fields'}[1])) .
+                ")"; break;
+        }
+    } else {
+        $fields = (string)$ast->{'·fields'};
+    }
+
+    $useVariables = [];
+    $indent = function($currentCount) use ($binds) {
+        $numberOfFlatMaps = count($binds);
+        return str_repeat(" ", ($numberOfFlatMaps - $currentCount) * 4);
+    };
+    $comprenhension = function($binds) use ($fields, &$comprenhension, &$useVariables, $indent) {
+        $use = count($useVariables) ? ' use (' . implode(', ', $useVariables) . ') ' : '';
+        if (count($binds) == 1) {
+            return "{$binds[0]['bind']}->map(function({$binds[0]['binded']})$use{
+" . $indent(0) . "return $fields;
+" . $indent(1) . "})";
+        } else {
+            $useVariables[] = (string) $binds[0]['binded'];
+            $flatMap = "{$binds[0]['bind']}->flatMap(function({$binds[0]['binded']})$use{
+" . $indent(count($binds) - 1) . "return " . $comprenhension(array_slice($binds, 1)) . ";
+" . $indent(count($binds)) . "})";
+            return $flatMap;
+        }
+    };
+
+    $for = new \Yay\Ast('·for');
+    $for->push(new \Yay\Ast('·comprenhension', new Yay\Token(T_STRING, $comprenhension($binds))));
+
+    $ast->append($for);
+} >> {
+    ·for?·{·for ···{ ·comprenhension}}
+}
