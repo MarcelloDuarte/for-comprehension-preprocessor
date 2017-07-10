@@ -35,7 +35,10 @@ macro ·recursion {
     $binds = [];
 
     if (is_array($ast->{'·binds'}[0]['·binded'])) {
-        $binds[0]['binded'] = (string)$ast->{'·binds'}[0]['·binded'][0];
+        $binds[0]['binded'] = [];
+        for ($i = 0; $i < count($ast->{'·binds'}[0]['·binded'][1]); $i++) {
+            $binds[0]['binded'][] = (string)$ast->{'·binds'}[0]['·binded'][1][$i];
+        }
     } else {
         $binds[0]['binded'] = (string)$ast->{'·binds'}[0]['·binded'] == '_' ?
             '$_' :
@@ -103,16 +106,32 @@ macro ·recursion {
     }
 
     $useVariables = [];
+
     $indent = function($currentCount) use ($binds) {
         $numberOfFlatMaps = count($binds);
         return str_repeat(" ", ($numberOfFlatMaps - $currentCount) * 4);
     };
+
     $comprenhension = function($binds) use ($fields, &$comprenhension, &$useVariables, $indent) {
         $use = count($useVariables) ? ' use (' . implode(', ', $useVariables) . ') ' : '';
+
         if (count($binds) == 1) {
-            return "{$binds[0]['bind']}->map(function({$binds[0]['binded']})$use{
-" . $indent(0) . "return $fields;
-" . $indent(1) . "})";
+
+            $body = '';
+            if (is_array($binds[0]['binded'])) {
+                for ($i = 0; $i < count($binds[0]['binded']); $i++) {
+                    $body .= $indent(0) . "{$binds[0]['binded'][$i]} = \$tuple->_" . ($i + 1) . ";\n";
+                    $var = '$tuple';
+                }
+            } else {
+                $var = (string)$binds[0]['binded'];
+            }
+
+            return "{$binds[0]['bind']}->map(function({$var})$use{\n" .
+                $body .
+                $indent(0) . "return $fields;\n" .
+                $indent(1) . "})";
+
         } else {
             $useVariables[] = (string) $binds[0]['binded'];
             $flatMap = "{$binds[0]['bind']}->flatMap(function({$binds[0]['binded']})$use{
