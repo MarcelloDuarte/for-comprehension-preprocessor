@@ -22,12 +22,14 @@ macro ·recursion {
         )·binds
         ·_()·for
     } yield ·either(
-                ·token(T_VARIABLE),
+                ·ls(
+                    ·token(T_VARIABLE),
+                    ·rtoken('/[\+\.\?\-&|\*\/\>\<=\!%\^]/')·operator)·operations,
                 ·chain(
                     ·token('('),
                     ·optional(·ls(·token(T_VARIABLE), ·token(','))),
                     ·token(')')
-                )
+                )·yieldTuple
             )·fields
 
 } >> function($ast) {
@@ -104,15 +106,20 @@ macro ·recursion {
     }
 
     $fields = '';
-    if (is_array($ast->{'·fields'})) {
+    if (isset($ast->{'·fields'}['·operations'])) {
+        $fields = (string) $ast->{'·fields'}['·operations'][0];
+        for ($i = 1; $i < count($ast->{'·fields'}['·operations']); $i++) {
+            $fields .= " {$ast->{'·fields'}['·operations'][$i]['·operator']} {$ast->{'·fields'}['·operations'][$i][0]}";
+        }
+    } elseif (is_array($ast->{'·fields'}['·yieldTuple'])) {
 
-        switch (count($ast->{'·fields'}[1])) {
+        switch (count($ast->{'·fields'}['·yieldTuple'][1])) {
             case 0: $fields = "Unit()"; break;
-            case 1: $fields = "Tuple({$ast->{'·fields'}[1][0]})"; break;
-            case 2: $fields = "Pair({$ast->{'·fields'}[1][0]}, {$ast->{'·fields'}[1][1]})"; break;
+            case 1: $fields = "Tuple({$ast->{'·fields'}['·yieldTuple'][1][0]})"; break;
+            case 2: $fields = "Pair({$ast->{'·fields'}['·yieldTuple'][1][0]}, {$ast->{'·fields'}['·yieldTuple'][1][1]})"; break;
             default:
                 $fields = "Tuple(" .
-                    implode(', ', array_map(function($field){ return (string) $field; }, $ast->{'·fields'}[1])) .
+                    implode(', ', array_map(function($field){ return (string) $field; }, $ast->{'·fields'}['·yieldTuple'][1])) .
                 ")"; break;
         }
     } else {
