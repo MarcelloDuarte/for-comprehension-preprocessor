@@ -31,7 +31,6 @@ macro ·recursion {
             )·fields
 
 } >> function($ast) {
-
     $binds = [];
 
     if (is_array($ast->{'·binds'}[0]['·binded'])) {
@@ -55,34 +54,49 @@ macro ·recursion {
         }
     })($ast->{'·binds'}[0]['·bind']);
 
-    $scope = 'binded';
+    $channel = 'newline';
     $i = count($binds) - 1;
 
     foreach ($remaining as $token) {
-        if ($scope == 'binded' && ($token->is(T_VARIABLE) || (string)$token === '_')) {
-            $scope = 'operator(<)';
+        if ($channel == 'newline' && ($token->is(T_VARIABLE) || (string)$token === '_')) {
+            $channel = 'looking for operator';
             $binds[$i + 1]['binded'] = ((string) $token == '_') ? '$_' : (string) $token;
             continue;
         }
 
-        if ($scope == 'operator(<)' && $token->is("<")) {
-            $scope = 'operator(-)';
+        if ($channel == 'newline' && $token->is('(')) {
+            $channel = 'looking for binded tuples';
+        }
+
+        if ($channel == 'looking for binded tuples' && ($token->is(T_VARIABLE) || (string)$token === '_')) {
+            if (!isset($binds[$i + 1]['binded'])) {
+                $binds[$i + 1]['binded'] = [];
+            }
+            $binds[$i + 1]['binded'][] = ((string) $token == '_') ? '$_' : (string) $token;
+        }
+
+        if ($channel == 'looking for binded tuples' && $token->is(')')) {
+            $channel = 'looking for operator';
+        }
+
+        if ($channel == 'looking for operator' && $token->is("<")) {
+            $channel = 'inside bind operator';
             continue;
         }
 
-        if ($scope == 'operator(-)' && $token->is("-")) {
-            $scope = 'bind';
+        if ($channel == 'inside bind operator' && $token->is("-")) {
+            $channel = 'looking for binds';
             continue;
         }
 
-        if ($scope == 'bind' && !($token->is(T_WHITESPACE) && stristr((string)$token, "\n"))) {
+        if ($channel == 'looking for binds' && !($token->is(T_WHITESPACE) && stristr((string)$token, "\n"))) {
             if (!isset($binds[$i + 1]['bind'])) {
                 $binds[$i + 1]['bind'] = '';
             }
             $binds[$i + 1]['bind'] .= (string) $token;
-        } elseif ($scope == 'bind') {
+        } elseif ($channel == 'looking for binds') {
             $i++;
-            $scope = 'binded';
+            $channel = 'newline';
         }
         if (isset($binds[$i + 1]['bind'])) {
             $binds[$i + 1]['bind'] = ltrim($binds[$i + 1]['bind']);
@@ -120,8 +134,8 @@ macro ·recursion {
             $body = '';
             if (is_array($binds[0]['binded'])) {
                 for ($i = 0; $i < count($binds[0]['binded']); $i++) {
-                    $body .= $indent(0) . "{$binds[0]['binded'][$i]} = \$tuple->_" . ($i + 1) . ";\n";
-                    $var = '$tuple';
+                    $body .= $indent(0) . "{$binds[0]['binded'][$i]} = \$t" . count($binds) . "->_" . ($i + 1) . ";\n";
+                    $var = '$t' . count($binds);
                 }
             } else {
                 $var = (string)$binds[0]['binded'];
@@ -133,10 +147,24 @@ macro ·recursion {
                 $indent(1) . "})";
 
         } else {
-            $useVariables[] = (string) $binds[0]['binded'];
-            $flatMap = "{$binds[0]['bind']}->flatMap(function({$binds[0]['binded']})$use{
-" . $indent(count($binds) - 1) . "return " . $comprenhension(array_slice($binds, 1)) . ";
-" . $indent(count($binds)) . "})";
+
+            $body = '';
+            if (is_array($binds[0]['binded'])) {
+                for ($i = 0; $i < count($binds[0]['binded']); $i++) {
+                    $body .= $indent(count($binds) - 1) . "{$binds[0]['binded'][$i]} = \$t" . count($binds) . "->_" . ($i + 1) . ";\n";
+                    $var = '$t' . count($binds);
+                    $useVariables[] = (string) $binds[0]['binded'][$i];
+                }
+            } else {
+                $var = (string)$binds[0]['binded'];
+                $useVariables[] = (string) $binds[0]['binded'];
+            }
+
+
+            $flatMap = "{$binds[0]['bind']}->flatMap(function({$var})$use {\n" .
+            $body .
+            $indent(count($binds) - 1) . "return " . $comprenhension(array_slice($binds, 1)) . ";\n" .
+            $indent(count($binds)) . "})";
             return $flatMap;
         }
     };
