@@ -2,6 +2,36 @@
 
 macro ·recursion {
     for (
+        ·ls (
+            ·chain(
+                ·either(
+                    ·token(T_VARIABLE)·A,
+                    ·either(
+                        ·label('_'),
+                        ·chain(
+                            ·token('('),
+                            ·optional(·ls(·either(·token(T_VARIABLE), ·token('_')), ·token(','))),
+                            ·token(')')
+                        )
+                    )
+                )·binded,
+                ·operator('<-'),
+                ·layer()·bind
+            ),
+            ·token(";")
+        )·binds
+        ·_()·for 
+    ) {
+        ···block
+    }
+} >> {
+    ·binds ···{·bind->withEach(function(·binded ···{·A}) {
+        ···block
+    });}
+}
+
+macro ·recursion {
+    for (
         ·chain(
             ·either(
                 ·token(T_VARIABLE),

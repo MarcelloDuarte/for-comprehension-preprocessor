@@ -37,10 +37,18 @@ which translates to:
 ImmList(1, 2, 3)->withEach(function($a) {
     ImmList($a)->withEach(function($b) use ($a) {
         ImmList($b)->withEach(function($c) use ($a, $b) {
-            echo $a + $b + $c;
+            echo ($a + $b + $c) . "\n";
         });
     });
 });
+```
+
+and prints
+
+```
+3
+6
+9
 ```
 
 Hmm! Starting to be interesting, huh? Oh! but's this is really nothing yet.
@@ -67,7 +75,7 @@ which produces a `ImmList(2, 3, 4)`.
 Flatmapping
 -----------
 
-You can compose this expressions to create bigger expressions. When you add lines to your for-comprehension you get them translated into `flatMap` operations, only the last one remains a `map`.
+You can compose these expressions to create bigger expressions. When you add lines to your for-comprehension you get them translated into `flatMap` operations, only the last one remains a `map`.
 
 ```php
 for {
