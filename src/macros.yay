@@ -113,14 +113,16 @@ macro ·recursion {
     $i = count($binds) - 1;
 
     foreach ($remaining as $token) {
-        if ($state == 'newline' && ($token->is(T_VARIABLE) || (string)$token === '_')) {
-            $state = 'looking for operator';
-            $binds[$i + 1]['binded'] = ((string) $token == '_') ? '$_' : (string) $token;
-            continue;
-        }
-
-        if ($state == 'newline' && $token->is('(')) {
-            $state = 'looking for binded tuples';
+        if ($state == 'newline') {
+            if ($token->is(T_VARIABLE) || (string)$token === '_') {
+                $state = 'looking for operator';
+                $binds[$i + 1]['binded'] = ((string) $token == '_') ? '$_' : (string) $token;
+                continue;
+            } elseif ($token->is('(')) {
+                $state = 'looking for binded tuples';
+            } else {
+                $state = 'looking for binds';
+            }
         }
 
         if ($state == 'looking for binded tuples' && ($token->is(T_VARIABLE) || (string)$token === '_')) {
@@ -149,19 +151,21 @@ macro ·recursion {
             continue;
         }
 
+        $bindsIndex = isset($binds[$i + 1]['bind']) ? $i + 1 : $i;
         if ($state == 'inside if') {
             if ($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) {
                 $i++;
                 $state = 'newline';
-                if (isset($binds[$i + 1]['condition'])) {
-                    rtrim(ltrim(trim($binds[$i + 1]['condition']), '('), ')');
+                
+                if (isset($binds[$bindsIndex]['condition'])) {
+                    rtrim(ltrim(trim($binds[$bindsIndex]['condition']), '('), ')');
                 }
             } else {
-                if (!isset($binds[$i + 1]['condition'])) {
-                    $binds[$i + 1]['condition'] = '';
+                if (!isset($binds[$bindsIndex]['condition'])) {
+                    $binds[$bindsIndex]['condition'] = '';
                 }
-                $binds[$i + 1]['condition'] .= (string) $token;
-                $binds[$i + 1]['condition'] = ltrim($binds[$i + 1]['condition']);
+                $binds[$bindsIndex]['condition'] .= (string) $token;
+                $binds[$bindsIndex]['condition'] = ltrim($binds[$bindsIndex]['condition']);
             }
         }
 
