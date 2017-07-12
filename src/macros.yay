@@ -144,6 +144,27 @@ macro ·recursion {
             continue;
         }
 
+        if ($state == 'looking for binds' && $token->is(T_IF)) {
+            $state = 'inside if';
+            continue;
+        }
+
+        if ($state == 'inside if') {
+            if ($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) {
+                $i++;
+                $state = 'newline';
+                if (isset($binds[$i + 1]['condition'])) {
+                    rtrim(ltrim(trim($binds[$i + 1]['condition']), '('), ')');
+                }
+            } else {
+                if (!isset($binds[$i + 1]['condition'])) {
+                    $binds[$i + 1]['condition'] = '';
+                }
+                $binds[$i + 1]['condition'] .= (string) $token;
+                $binds[$i + 1]['condition'] = ltrim($binds[$i + 1]['condition']);
+            }
+        }
+
         if ($state == 'looking for binds' && !($token->is(T_WHITESPACE) && stristr((string)$token, "\n"))) {
             if (!isset($binds[$i + 1]['bind'])) {
                 $binds[$i + 1]['bind'] = '';
@@ -192,7 +213,7 @@ macro ·recursion {
     };
 
     $comprenhension = function($binds) use ($fields, &$comprenhension, &$useVariables, $indent) {
-        $use = count($useVariables) ? ' use (' . implode(', ', $useVariables) . ') ' : '';
+        $use = count($useVariables) ? 'use (' . implode(', ', $useVariables) . ') ' : '';
 
         if (count($binds) == 1) {
 
@@ -207,17 +228,14 @@ macro ·recursion {
             }
             $filterOrMap = isset($binds[0]['condition']) &&
                  strlen(trim($binds[0]['condition'])) > 0 ?
-                 'filter' : 'map';
-            return "{$binds[0]['bind']}->$filterOrMap(function({$var})$use{\n" .
-                ($filterOrMap === 'map' ?
+                 "withFilter(function({$var}) $use{ return {$binds[0]['condition']}; })->map" : 'map';
+                 $binds[0]['bind'] = trim((string)$binds[0]['bind']);
+            return "{$binds[0]['bind']}->{$filterOrMap}(function({$var}) $use{\n" .
                 ($body .
                 $indent(0) . "return $fields;\n" .
-                $indent(1) . "})") :
-                ($indent(0) . "return {$binds[0]['condition']};\n" .
-                $indent(1) . "})"));
+                $indent(1) . "})");
 
         } else {
-
             $body = '';
             if (is_array($binds[0]['binded'])) {
                 for ($i = 0; $i < count($binds[0]['binded']); $i++) {
@@ -230,8 +248,11 @@ macro ·recursion {
                 $useVariables[] = (string) $binds[0]['binded'];
             }
 
-
-            $flatMap = "{$binds[0]['bind']}->flatMap(function({$var})$use {\n" .
+            $filterOrFlatMap = isset($binds[0]['condition']) &&
+                 strlen(trim($binds[0]['condition'])) > 0 ?
+                 "withFilter(function({$var}) $use{ return {$binds[0]['condition']}; })->flatMap" : 'flatMap';
+            $binds[0]['bind'] = trim((string)$binds[0]['bind']);
+            $flatMap = "{$binds[0]['bind']}->{$filterOrFlatMap}(function({$var}) $use{\n" .
             $body .
             $indent(count($binds) - 1) . "return " . $comprenhension(array_slice($binds, 1)) . ";\n" .
             $indent(count($binds)) . "})";
