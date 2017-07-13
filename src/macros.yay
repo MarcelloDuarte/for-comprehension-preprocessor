@@ -24,10 +24,147 @@ macro ·recursion {
     ) {
         ···block
     }
+} >> function($ast) {
+    $binds = [];
+    $binded = $ast->{'·binds'}[0]['·binded']['·A'];
+
+    if (is_array($binded)) {
+        $binds[0]['binded'] = [];
+        for ($i = 0; $i < count($binded[1]); $i++) {
+            $binds[0]['binded'][] = (string)$binded[$i];
+        }
+    } else {
+        $binds[0]['binded'] = (string)$binded == '_' ?
+            '$_' :
+            (string)$binded;
+    }
+
+    list ($binds[0]['bind'], $binds[0]['condition'] , $remaining) = (function($bind) {
+        $binded = '';
+        $condition = '';
+        $state = 'start';
+
+        foreach ($bind as $i => $token) {
+            if ($token->is(T_IF)) {
+                $state = 'condition';
+                continue;
+            }
+
+            if ($state == 'condition') {
+                $condition .= (string) $token;
+            } elseif (!$token->is(';')) {
+                $binded .= (string) $token;
+            }
+
+            if (($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';') || $i == (count($bind) - 1)) {
+                return [trim($binded), rtrim(ltrim(trim($condition), '('), ')'), array_slice($bind, $i+1)];
+            }
+        }
+    })($ast->{'·binds'}[0]['·bind']);
+
+    $state = 'newline';
+    $i = count($binds) - 1;
+
+    foreach ($remaining as $token) {
+        if ($state == 'newline') {
+            if ($token->is(T_WHITESPACE) && !stristr((string)$token, "\n")) {
+                continue;
+            }
+            if ($token->is(T_VARIABLE) || (string)$token === '_') {
+                $state = 'looking for operator';
+                $binds[$i + 1]['binded'] = ((string) $token == '_') ? '$_' : (string) $token;
+                continue;
+            } elseif ($token->is('(')) {
+                $state = 'looking for binded tuples';
+            } else {
+                $state = 'looking for binds';
+            }
+        }
+
+        if ($state == 'looking for binded tuples' && ($token->is(T_VARIABLE) || (string)$token === '_')) {
+            if (!isset($binds[$i + 1]['binded'])) {
+                $binds[$i + 1]['binded'] = [];
+            }
+            $binds[$i + 1]['binded'][] = ((string) $token == '_') ? '$_' : (string) $token;
+        }
+
+        if ($state == 'looking for binded tuples' && $token->is(')')) {
+            $state = 'looking for operator';
+        }
+
+        if ($state == 'looking for operator' && $token->is("<")) {
+            $state = 'inside bind operator';
+            continue;
+        }
+
+        if ($state == 'inside bind operator' && $token->is("-")) {
+            $state = 'looking for binds';
+            continue;
+        }
+
+        if ($state == 'looking for binds' && $token->is(T_IF)) {
+            $state = 'inside if';
+            continue;
+        }
+
+        $bindsIndex = isset($binds[$i + 1]['bind']) ? $i + 1 : $i;
+        if ($state == 'inside if') {
+            if (($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
+                $i++;
+                $state = 'newline';
+                
+                if (isset($binds[$bindsIndex]['condition'])) {
+                    rtrim(ltrim(trim($binds[$bindsIndex]['condition']), '('), ')');
+                }
+            } else {
+                if (!isset($binds[$bindsIndex]['condition'])) {
+                    $binds[$bindsIndex]['condition'] = '';
+                }
+                $binds[$bindsIndex]['condition'] .= (string) $token;
+                $binds[$bindsIndex]['condition'] = ltrim($binds[$bindsIndex]['condition']);
+            }
+        }
+
+        if ($state == 'looking for binds') {
+            if (!($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) && !$token->is(';')) {
+                if (!isset($binds[$i + 1]['bind'])) {
+                    $binds[$i + 1]['bind'] = '';
+                }
+                $binds[$i + 1]['bind'] .= (string) $token;
+            } else {
+                $i++;
+                $state = 'newline';
+            }
+        }
+        if (isset($binds[$i + 1]['bind'])) {
+            $binds[$i + 1]['bind'] = ltrim($binds[$i + 1]['bind']);
+        }
+    }
+
+    $block = implode('', array_map(function($e) { return (string)$e; }, $ast->{'···block'}));
+
+    $indent = function($currentCount) use ($binds) {
+        $numberOfWithEach = count($binds);
+        return str_repeat(" ", ($numberOfWithEach - $currentCount) * 4);
+    };
+
+    $comprenhension = function($binds, $block) use (&$comprenhension, $indent) {
+        if (count($binds) == 1) {
+            return sprintf("%s->withEach(function(%s) {\n%s%s\n%s})",
+                $binds[0]['bind'], $binds[0]['binded'],
+                $indent(0), trim((string) $block), $indent(1));
+        }
+        return sprintf("%s->withEach(function(%s) {\n%sreturn %s;\n%s})",
+            $binds[0]['bind'], $binds[0]['binded'], $indent(count($binds) - 1),
+            $comprenhension(array_slice($binds, 1), $block), $indent(count($binds)));
+    };
+
+    $for = new \Yay\Ast('·for');
+    $for->push(new \Yay\Ast('·comprenhension', new Yay\Token(T_STRING, $comprenhension($binds, $block) . ';')));
+
+    $ast->append($for);
 } >> {
-    ·binds ···{·bind->withEach(function(·binded ···{·A}) {
-        ···block
-    });}
+    ·for?·{·for ···{ ·comprenhension}}
 }
 
 macro ·recursion {
@@ -127,7 +264,7 @@ macro ·recursion {
                 continue;
             }
 
-            if ($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) {
+            if (($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
                 return [trim($binded), rtrim(ltrim(trim($condition), '('), ')'), array_slice($bind, $i+1)];
             }
 
@@ -183,7 +320,7 @@ macro ·recursion {
 
         $bindsIndex = isset($binds[$i + 1]['bind']) ? $i + 1 : $i;
         if ($state == 'inside if') {
-            if ($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) {
+            if (($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
                 $i++;
                 $state = 'newline';
                 
@@ -199,7 +336,7 @@ macro ·recursion {
             }
         }
 
-        if ($state == 'looking for binds' && !($token->is(T_WHITESPACE) && stristr((string)$token, "\n"))) {
+        if ($state == 'looking for binds' && !($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
             if (!isset($binds[$i + 1]['bind'])) {
                 $binds[$i + 1]['bind'] = '';
             }
