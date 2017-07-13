@@ -1,4 +1,5 @@
 {
+    "type": "pre-macro",
     "name": "md/for-comprehension-preprocessor",
     "license": "MIT",
     "require": {
