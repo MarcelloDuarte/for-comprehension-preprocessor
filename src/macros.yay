@@ -273,7 +273,10 @@ macro ·recursion {
                     $tmp = "/tmp/" . md5(microtime());
                     file_put_contents($tmp . ".pre", $code);
                     Pre\Plugin\compile($tmp . ".pre", $tmp . ".php");
-                    return [file_get_contents($tmp . ".php"), '', []];
+                    $parsed = file_get_contents($tmp . ".php");
+                    unlink($tmp . ".pre");
+                    unlink($tmp . ".php");
+                    return [$parsed, '', []];
                 }
                 if ($token->is(T_IF)) {
                     $state = 'condition';
