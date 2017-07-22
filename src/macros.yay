@@ -241,198 +241,217 @@ macro ·recursion {
             )·fields
 
 } >> function($ast) {
-    $binds = [];
 
-    if (is_array($ast->{'·binds'}[0]['·binded'])) {
-        $binds[0]['binded'] = [];
-        for ($i = 0; $i < count($ast->{'·binds'}[0]['·binded'][1]); $i++) {
-            $binds[0]['binded'][] = (string)$ast->{'·binds'}[0]['·binded'][1][$i];
+    $comprenhensionFromAst = function($ast) use (&$comprenhensionFromAst) {
+        $binds = [];
+
+        if (is_array($ast->{'·binds'}[0]['·binded'])) {
+            $binds[0]['binded'] = [];
+            for ($i = 0; $i < count($ast->{'·binds'}[0]['·binded'][1]); $i++) {
+                $binds[0]['binded'][] = (string)$ast->{'·binds'}[0]['·binded'][1][$i];
+            }
+        } else {
+            $binds[0]['binded'] = (string)$ast->{'·binds'}[0]['·binded'] == '_' ?
+                '$_' :
+                (string)$ast->{'·binds'}[0]['·binded'];
         }
-    } else {
-        $binds[0]['binded'] = (string)$ast->{'·binds'}[0]['·binded'] == '_' ?
-            '$_' :
-            (string)$ast->{'·binds'}[0]['·binded'];
-    }
 
-    list ($binds[0]['bind'], $binds[0]['condition'] , $remaining) = (function($bind) {
-        $binded = '';
-        $condition = '';
-        $state = 'start';
-        foreach ($bind as $i => $token) {
-            if ($token->is(T_IF)) {
-                $state = 'condition';
-                continue;
+        list ($binds[0]['bind'], $binds[0]['condition'] , $remaining) = (function($bind) use ($comprenhensionFromAst) {
+            $binded = '';
+            $condition = '';
+            $state = 'start';
+            foreach ($bind as $i => $token) {
+                if ($token->is(T_FOR)) {
+                    // @TODO replace this by direct call to the Yay engine
+                    $code = implode("", array_map(function($t) {
+                        if ($t->is(T_WHITESPACE) && stristr((string)$t, "\n")) {
+                            return " ";
+                        } else {
+                            return (string)$t;
+                        }
+                    },$bind));
+                    $tmp = "/tmp/" . md5(microtime());
+                    file_put_contents($tmp . ".pre", $code);
+                    Pre\Plugin\compile($tmp . ".pre", $tmp . ".php");
+                    return [file_get_contents($tmp . ".php"), '', []];
+                }
+                if ($token->is(T_IF)) {
+                    $state = 'condition';
+                    continue;
+                }
+
+                if (($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
+                    return [trim($binded), rtrim(ltrim(trim($condition), '('), ')'), array_slice($bind, $i+1)];
+                }
+
+                if ($state == 'condition') {
+                    $condition .= (string) $token;
+                } else {
+                    $binded .= (string) $token;                
+                }
+            }
+            return [trim($binded), rtrim(ltrim(trim($condition), '('), ')'), array_slice($bind, $i+1)];
+        })($ast->{'·binds'}[0]['·bind']);
+
+        $state = 'newline';
+        $i = count($binds) - 1;
+
+        foreach ($remaining as $token) {
+            if ($state == 'newline') {
+                if ($token->is(T_VARIABLE) || (string)$token === '_') {
+                    $state = 'looking for operator';
+                    $binds[$i + 1]['binded'] = ((string) $token == '_') ? '$_' : (string) $token;
+                    continue;
+                } elseif ($token->is('(')) {
+                    $state = 'looking for binded tuples';
+                } else {
+                    $state = 'looking for binds';
+                }
             }
 
-            if (($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
-                return [trim($binded), rtrim(ltrim(trim($condition), '('), ')'), array_slice($bind, $i+1)];
+            if ($state == 'looking for binded tuples' && ($token->is(T_VARIABLE) || (string)$token === '_')) {
+                if (!isset($binds[$i + 1]['binded'])) {
+                    $binds[$i + 1]['binded'] = [];
+                }
+                $binds[$i + 1]['binded'][] = ((string) $token == '_') ? '$_' : (string) $token;
             }
 
-            if ($state == 'condition') {
-                $condition .= (string) $token;
-            } else {
-                $binded .= (string) $token;                
-            }
-        }
-    })($ast->{'·binds'}[0]['·bind']);
-
-    $state = 'newline';
-    $i = count($binds) - 1;
-
-    foreach ($remaining as $token) {
-        if ($state == 'newline') {
-            if ($token->is(T_VARIABLE) || (string)$token === '_') {
+            if ($state == 'looking for binded tuples' && $token->is(')')) {
                 $state = 'looking for operator';
-                $binds[$i + 1]['binded'] = ((string) $token == '_') ? '$_' : (string) $token;
+            }
+
+            if ($state == 'looking for operator' && $token->is("<")) {
+                $state = 'inside bind operator';
                 continue;
-            } elseif ($token->is('(')) {
-                $state = 'looking for binded tuples';
-            } else {
+            }
+
+            if ($state == 'inside bind operator' && $token->is("-")) {
                 $state = 'looking for binds';
+                continue;
             }
-        }
 
-        if ($state == 'looking for binded tuples' && ($token->is(T_VARIABLE) || (string)$token === '_')) {
-            if (!isset($binds[$i + 1]['binded'])) {
-                $binds[$i + 1]['binded'] = [];
+            if ($state == 'looking for binds' && $token->is(T_IF)) {
+                $state = 'inside if';
+                continue;
             }
-            $binds[$i + 1]['binded'][] = ((string) $token == '_') ? '$_' : (string) $token;
-        }
 
-        if ($state == 'looking for binded tuples' && $token->is(')')) {
-            $state = 'looking for operator';
-        }
+            $bindsIndex = isset($binds[$i + 1]['bind']) ? $i + 1 : $i;
+            if ($state == 'inside if') {
+                if (($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
+                    $i++;
+                    $state = 'newline';
+                    
+                    if (isset($binds[$bindsIndex]['condition'])) {
+                        rtrim(ltrim(trim($binds[$bindsIndex]['condition']), '('), ')');
+                    }
+                } else {
+                    if (!isset($binds[$bindsIndex]['condition'])) {
+                        $binds[$bindsIndex]['condition'] = '';
+                    }
+                    $binds[$bindsIndex]['condition'] .= (string) $token;
+                    $binds[$bindsIndex]['condition'] = ltrim($binds[$bindsIndex]['condition']);
+                }
+            }
 
-        if ($state == 'looking for operator' && $token->is("<")) {
-            $state = 'inside bind operator';
-            continue;
-        }
-
-        if ($state == 'inside bind operator' && $token->is("-")) {
-            $state = 'looking for binds';
-            continue;
-        }
-
-        if ($state == 'looking for binds' && $token->is(T_IF)) {
-            $state = 'inside if';
-            continue;
-        }
-
-        $bindsIndex = isset($binds[$i + 1]['bind']) ? $i + 1 : $i;
-        if ($state == 'inside if') {
-            if (($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
+            if ($state == 'looking for binds' && !($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
+                if (!isset($binds[$i + 1]['bind'])) {
+                    $binds[$i + 1]['bind'] = '';
+                }
+                $binds[$i + 1]['bind'] .= (string) $token;
+            } elseif ($state == 'looking for binds') {
                 $i++;
                 $state = 'newline';
-                
-                if (isset($binds[$bindsIndex]['condition'])) {
-                    rtrim(ltrim(trim($binds[$bindsIndex]['condition']), '('), ')');
+            }
+            if (isset($binds[$i + 1]['bind'])) {
+                $binds[$i + 1]['bind'] = ltrim($binds[$i + 1]['bind']);
+            }
+        }
+
+        $fields = '';
+        if (isset($ast->{'·fields'}['·operations'])) {
+            $fields = (string) $ast->{'·fields'}['·operations'][0];
+            for ($i = 1; $i < count($ast->{'·fields'}['·operations']); $i++) {
+                $fields .= " {$ast->{'·fields'}['·operations'][$i]['·operator']} {$ast->{'·fields'}['·operations'][$i][0]}";
+            }
+        } elseif (is_array($ast->{'·fields'}['·yieldTuple'])) {
+            if (isset($ast->{'·fields'}['·yieldTuple'][0])) {
+                $elements = [(string)$ast->{'·fields'}['·yieldTuple'][0]];
+                for ($i = 1; $i < count($ast->{'·fields'}['·yieldTuple']); $i++) {
+                    $operator = (string)$ast->{'·fields'}['·yieldTuple'][$i]['·yieldOperator'];
+                    if ($operator == ',') {
+                        $elements[] = (string)$ast->{'·fields'}['·yieldTuple'][$i][0];
+                    } else {
+                        $elements[count($elements) - 1] .= " $operator {$ast->{'·fields'}['·yieldTuple'][$i][0]}";
+                    }
+                }
+                switch(count($elements)) {
+                    case 2: $fields = sprintf('Pair(%s)', implode(', ', $elements)); break;
+                    default: $fields = sprintf('Tuple(%s)', implode(', ', $elements)); break;
                 }
             } else {
-                if (!isset($binds[$bindsIndex]['condition'])) {
-                    $binds[$bindsIndex]['condition'] = '';
-                }
-                $binds[$bindsIndex]['condition'] .= (string) $token;
-                $binds[$bindsIndex]['condition'] = ltrim($binds[$bindsIndex]['condition']);
+                $fields = 'Unit()';
             }
         }
 
-        if ($state == 'looking for binds' && !($token->is(T_WHITESPACE) && stristr((string)$token, "\n")) || $token->is(';')) {
-            if (!isset($binds[$i + 1]['bind'])) {
-                $binds[$i + 1]['bind'] = '';
-            }
-            $binds[$i + 1]['bind'] .= (string) $token;
-        } elseif ($state == 'looking for binds') {
-            $i++;
-            $state = 'newline';
-        }
-        if (isset($binds[$i + 1]['bind'])) {
-            $binds[$i + 1]['bind'] = ltrim($binds[$i + 1]['bind']);
-        }
-    }
+        $useVariables = [];
 
-    $fields = '';
-    if (isset($ast->{'·fields'}['·operations'])) {
-        $fields = (string) $ast->{'·fields'}['·operations'][0];
-        for ($i = 1; $i < count($ast->{'·fields'}['·operations']); $i++) {
-            $fields .= " {$ast->{'·fields'}['·operations'][$i]['·operator']} {$ast->{'·fields'}['·operations'][$i][0]}";
-        }
-    } elseif (is_array($ast->{'·fields'}['·yieldTuple'])) {
-        if (isset($ast->{'·fields'}['·yieldTuple'][0])) {
-            $elements = [(string)$ast->{'·fields'}['·yieldTuple'][0]];
-            for ($i = 1; $i < count($ast->{'·fields'}['·yieldTuple']); $i++) {
-                $operator = (string)$ast->{'·fields'}['·yieldTuple'][$i]['·yieldOperator'];
-                if ($operator == ',') {
-                    $elements[] = (string)$ast->{'·fields'}['·yieldTuple'][$i][0];
+        $indent = function($currentCount) use ($binds) {
+            $numberOfFlatMaps = count($binds);
+            return str_repeat(" ", ($numberOfFlatMaps - $currentCount) * 4);
+        };
+
+        $comprenhension = function($binds) use ($fields, &$comprenhension, &$useVariables, $indent) {
+            $use = count($useVariables) ? 'use (' . implode(', ', $useVariables) . ') ' : '';
+
+            if (count($binds) == 1) {
+
+                $body = '';
+                if (is_array($binds[0]['binded'])) {
+                    for ($i = 0; $i < count($binds[0]['binded']); $i++) {
+                        $body .= $indent(0) . "{$binds[0]['binded'][$i]} = \$t" . count($binds) . "->_" . ($i + 1) . ";\n";
+                        $var = '$t' . count($binds);
+                    }
                 } else {
-                    $elements[count($elements) - 1] .= " $operator {$ast->{'·fields'}['·yieldTuple'][$i][0]}";
+                    $var = (string)$binds[0]['binded'];
                 }
-            }
-            switch(count($elements)) {
-                case 2: $fields = sprintf('Pair(%s)', implode(', ', $elements)); break;
-                default: $fields = sprintf('Tuple(%s)', implode(', ', $elements)); break;
-            }
-        } else {
-            $fields = 'Unit()';
-        }
-    }
+                $filterOrMap = isset($binds[0]['condition']) &&
+                     strlen(trim($binds[0]['condition'])) > 0 ?
+                     "withFilter(function({$var}) $use{ return {$binds[0]['condition']}; })->map" : 'map';
+                     $binds[0]['bind'] = trim((string)$binds[0]['bind']);
+                return "{$binds[0]['bind']}->{$filterOrMap}(function({$var}) $use{\n" .
+                    ($body .
+                    $indent(0) . "return $fields;\n" .
+                    $indent(1) . "})");
 
-    $useVariables = [];
-
-    $indent = function($currentCount) use ($binds) {
-        $numberOfFlatMaps = count($binds);
-        return str_repeat(" ", ($numberOfFlatMaps - $currentCount) * 4);
-    };
-
-    $comprenhension = function($binds) use ($fields, &$comprenhension, &$useVariables, $indent) {
-        $use = count($useVariables) ? 'use (' . implode(', ', $useVariables) . ') ' : '';
-
-        if (count($binds) == 1) {
-
-            $body = '';
-            if (is_array($binds[0]['binded'])) {
-                for ($i = 0; $i < count($binds[0]['binded']); $i++) {
-                    $body .= $indent(0) . "{$binds[0]['binded'][$i]} = \$t" . count($binds) . "->_" . ($i + 1) . ";\n";
-                    $var = '$t' . count($binds);
-                }
             } else {
-                $var = (string)$binds[0]['binded'];
-            }
-            $filterOrMap = isset($binds[0]['condition']) &&
-                 strlen(trim($binds[0]['condition'])) > 0 ?
-                 "withFilter(function({$var}) $use{ return {$binds[0]['condition']}; })->map" : 'map';
-                 $binds[0]['bind'] = trim((string)$binds[0]['bind']);
-            return "{$binds[0]['bind']}->{$filterOrMap}(function({$var}) $use{\n" .
-                ($body .
-                $indent(0) . "return $fields;\n" .
-                $indent(1) . "})");
-
-        } else {
-            $body = '';
-            if (is_array($binds[0]['binded'])) {
-                for ($i = 0; $i < count($binds[0]['binded']); $i++) {
-                    $body .= $indent(count($binds) - 1) . "{$binds[0]['binded'][$i]} = \$t" . count($binds) . "->_" . ($i + 1) . ";\n";
-                    $var = '$t' . count($binds);
-                    $useVariables[] = (string) $binds[0]['binded'][$i];
+                $body = '';
+                if (is_array($binds[0]['binded'])) {
+                    for ($i = 0; $i < count($binds[0]['binded']); $i++) {
+                        $body .= $indent(count($binds) - 1) . "{$binds[0]['binded'][$i]} = \$t" . count($binds) . "->_" . ($i + 1) . ";\n";
+                        $var = '$t' . count($binds);
+                        $useVariables[] = (string) $binds[0]['binded'][$i];
+                    }
+                } else {
+                    $var = (string)$binds[0]['binded'];
+                    $useVariables[] = (string) $binds[0]['binded'];
                 }
-            } else {
-                $var = (string)$binds[0]['binded'];
-                $useVariables[] = (string) $binds[0]['binded'];
-            }
 
-            $filterOrFlatMap = isset($binds[0]['condition']) &&
-                 strlen(trim($binds[0]['condition'])) > 0 ?
-                 "withFilter(function({$var}) $use{ return {$binds[0]['condition']}; })->flatMap" : 'flatMap';
-            $binds[0]['bind'] = trim((string)$binds[0]['bind']);
-            $flatMap = "{$binds[0]['bind']}->{$filterOrFlatMap}(function({$var}) $use{\n" .
-            $body .
-            $indent(count($binds) - 1) . "return " . $comprenhension(array_slice($binds, 1)) . ";\n" .
-            $indent(count($binds)) . "})";
-            return $flatMap;
-        }
+                $filterOrFlatMap = isset($binds[0]['condition']) &&
+                     strlen(trim($binds[0]['condition'])) > 0 ?
+                     "withFilter(function({$var}) $use{ return {$binds[0]['condition']}; })->flatMap" : 'flatMap';
+                $binds[0]['bind'] = trim((string)$binds[0]['bind']);
+                $flatMap = "{$binds[0]['bind']}->{$filterOrFlatMap}(function({$var}) $use{\n" .
+                $body .
+                $indent(count($binds) - 1) . "return " . $comprenhension(array_slice($binds, 1)) . ";\n" .
+                $indent(count($binds)) . "})";
+                return $flatMap;
+            }
+        };
+        return $comprenhension($binds);
     };
 
     $for = new \Yay\Ast('·for');
-    $for->push(new \Yay\Ast('·comprenhension', new Yay\Token(T_STRING, $comprenhension($binds))));
+    $for->push(new \Yay\Ast('·comprenhension', new Yay\Token(T_STRING, $comprenhensionFromAst($ast))));
 
     $ast->append($for);
 } >> {
