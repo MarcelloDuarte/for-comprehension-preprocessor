@@ -25,23 +25,23 @@ for {
 
 --EXPECT--
 
-Some(42)->map(function ($a) {
+Some(42)->map(function($a) {
     return Unit();
 });
 
-Some(42)->map(function ($a) {
+Some(42)->map(function($a) {
     return Tuple($a);
 });
 
-Some(42)->flatMap(function ($a) {
-    return Some(43)->map(function ($b) use ($a) {
+Some(42)->flatMap(function($a) {
+    return Some(43)->map(function($b) use ($a) {
         return Pair($a, $b);
     });
 });
 
-Some(42)->flatMap(function ($a) {
-    return Some(43)->flatMap(function ($b) use ($a) {
-        return Some(44)->map(function ($c) use ($a, $b) {
+Some(42)->flatMap(function($a) {
+    return Some(43)->flatMap(function($b) use ($a) {
+        return Some(44)->map(function($c) use ($a, $b) {
             return Tuple($a, $c, $b);
         });
     });

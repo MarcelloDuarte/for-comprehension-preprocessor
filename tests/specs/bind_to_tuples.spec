@@ -18,18 +18,18 @@ for {
 
 --EXPECT--
 
-Some(Tuple(1))->map(function ($t1) {
+Some(Tuple(1))->map(function($t1) {
     $a = $t1->_1;
     return $a;
 });
 
-Some(Pair(1, 2))->map(function ($t1) {
+Some(Pair(1,2))->map(function($t1) {
     $a = $t1->_1;
     $b = $t1->_2;
     return $b;
 });
 
-Some(Tuple(1, 2, 3))->map(function ($t1) {
+Some(Tuple(1,2,3))->map(function($t1) {
     $a = $t1->_1;
     $b = $t1->_2;
     $c = $t1->_3;

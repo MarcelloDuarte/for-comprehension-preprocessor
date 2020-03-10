@@ -10,6 +10,6 @@ for {
 
 --EXPECT--
 
-Some(42)->map(function ($a) {
+Some(42)->map(function($a) {
     return $a;
 });
